@@ -21,13 +21,22 @@ Give it one goal. [TypeSafe's Jev](https://docs.typesafe.ai/introduction) picks 
 
 ## Este fork: servidor MCP e Ollama
 
+Três mudanças em relação ao [original](https://github.com/browser-use/jev-ultrafast). O loop do agente (`agent.py`, `browser.py`, `snapshot.js`, `questions.py`) está igual.
+
+1. **Servidor MCP.** O agente vira uma tool que o Claude Code, o Claude Desktop ou qualquer cliente MCP podem chamar.
+2. **Modelo de texto local.** O texto dos campos pode vir de um modelo no Ollama, sem custo e sem mandar o texto da página para a cloud.
+3. **Browser dedicado.** O servidor arranca sozinho um Edge/Chromium com CDP quando ele não está a correr.
+
 ### O que muda em relação ao original
 
 | Ficheiro | Mudança |
 |---|---|
-| `jev_ultrafast/mcp_server.py` (novo) | Servidor MCP (stdio) com as tools `jev_ultrafast_run` e `jev_ultrafast_doctor`. Arranca sozinho um browser dedicado quando a porta CDP não responde. |
-| `jev_ultrafast/model.py` | Nova opção `TEXT_MODEL_REASONING=effort_none`, que envia `reasoning_effort: "none"`, o formato que o endpoint `/v1` do Ollama respeita. |
-| `pyproject.toml` | Dependência `mcp` e comando `jev-ultrafast-mcp`. |
+| `jev_ultrafast/mcp_server.py` (novo) | Servidor MCP (stdio) com as tools `jev_ultrafast_run` e `jev_ultrafast_doctor`. Arranca um browser dedicado quando a porta CDP não responde. Erros voltam como JSON com uma dica, em vez de derrubar o servidor. |
+| `jev_ultrafast/model.py` | Nova opção `TEXT_MODEL_REASONING=effort_none`, que envia `reasoning_effort: "none"`, o formato que o endpoint `/v1` do Ollama respeita. As opções originais continuam iguais. |
+| `pyproject.toml` | Dependência `mcp>=2.2.0` e comando `jev-ultrafast-mcp`. |
+| `README.md` | Esta secção. |
+
+O `.env.example` não mudou: continua a sugerir o OpenRouter. A configuração com Ollama está [abaixo](#configuração-env).
 
 ### Dois modelos, dois papéis
 
@@ -51,10 +60,18 @@ Clicar, navegar e escolher opções funciona sem modelo de texto. Ele só é cha
 | | Original | Este fork |
 |---|---|---|
 | Default no código | DeepSeek `deepseek-chat` | igual |
-| Sugerido no `.env.example` | OpenRouter `inception/mercury-2.5` | Ollama local `qwen3.5:9b` |
+| Sugerido | OpenRouter `inception/mercury-2.5` (`.env.example`) | Ollama local `qwen3.5:9b` (este README) |
 | Custo | pago | grátis |
 | Texto da página | vai para a cloud | fica na máquina (só a decisão vai para a TypeSafe) |
 | Latência | rápida | ~13 s no primeiro pedido (carga do modelo), depois rápida |
+
+Valores de `TEXT_MODEL_REASONING`:
+
+| Valor | Campo enviado | Para quem |
+|---|---|---|
+| (vazio) | `thinking: disabled` no DeepSeek, `reasoning.effort: low` nos outros | original |
+| `none` | `reasoning.enabled: false` | original, formato OpenRouter |
+| `effort_none` | `reasoning_effort: "none"` | **novo**, formato OpenAI, respeitado pelo Ollama |
 
 Sem `effort_none`, o qwen3.5 no Ollama ignora o pedido de desligar o raciocínio, gasta ~320 tokens a pensar e devolve uma resposta vazia. Com ele, responde em ~7 tokens.
 
@@ -80,11 +97,13 @@ O `.env` está no `.gitignore`. Não o commites.
 
 ### Browser
 
-O Chromium 136+ ignora `--remote-debugging-port` no perfil por omissão. Por isso o servidor arranca uma **segunda instância** do browser (Edge por omissão) com perfil próprio:
+O Chromium 136+ ignora `--remote-debugging-port` no perfil por omissão. Por isso o servidor usa uma **segunda instância** do browser com perfil próprio. Quando `BU_CDP_URL` está definido e não responde, `jev_ultrafast_run` corre o equivalente a:
 
 ```bash
-open -na "Microsoft Edge" --args --user-data-dir="$HOME/.config/browser-harness/edge-profile" --remote-debugging-port=9222
+open -na "Microsoft Edge" --args --user-data-dir="$HOME/.config/browser-harness/edge-profile" --remote-debugging-port=9222 --no-first-run --no-default-browser-check
 ```
+
+e espera até 20 s pela porta CDP. `JEV_BROWSER_APP` troca o browser (ex.: `"Google Chrome"`), `JEV_EDGE_PROFILE_DIR` troca o perfil. O arranque automático usa `open`, por isso só funciona no macOS. Noutros sistemas, arranca o browser à mão com as mesmas flags.
 
 O browser normal do utilizador fica intocado. Depois de mudar variáveis de ambiente, corre `browser-harness --reload`, senão o daemon antigo continua com o ambiente velho.
 
@@ -107,10 +126,26 @@ Claude Desktop / Cowork (`claude_desktop_config.json`):
 
 ### Tools
 
-- **`jev_ultrafast_run(url, goal, include_page_text=true, record_dir=null)`** corre um objetivo até ao fim. Devolve `status`, `final_url`, `steps`, `history` e `page_text` (primeiros 4000 caracteres). `status: done` é a palavra do agente: confirma pelo `final_url` e pelo `page_text`.
-- **`jev_ultrafast_doctor()`** verifica a chave TypeSafe, o endpoint de texto e o browser. Corre-o primeiro quando o `run` der erro.
+**`jev_ultrafast_run(url, goal, include_page_text=true, record_dir=null)`** corre um objetivo até ao fim (máximo de 60 ações, como no original).
 
-Limites herdados do MVP: sem shadow DOM, iframes, canvas, uploads nem pop-ups.
+- `goal`: um objetivo estreito com condição de paragem visível, 5 a 2000 caracteres. Sem seletores, listas de passos nem credenciais.
+- `record_dir`: pasta opcional para screenshots JPEG por passo (mais lento).
+- Devolve JSON com `status` (`done` ou `blocked`), `final_url`, `steps`, `elapsed_ms`, `history` (operação, ação, texto escrito, latência por passo), `note` e `page_text` (primeiros 4000 caracteres do texto visível).
+- `status: done` é a palavra do agente. Confirma pelo `final_url` e pelo `page_text`.
+- Em erro devolve `{"error": ..., "hint": ...}`. A chave em falta aparece aqui, não no arranque do servidor.
+
+**`jev_ultrafast_doctor()`** verifica:
+
+| Verificação | O que confirma |
+|---|---|
+| `typesafe_key` | `TYPESAFE_API_KEY` definido |
+| `text_endpoint` | `<TEXT_MODEL_BASE_URL>/models` responde e lista o `TEXT_MODEL` |
+| `cdp_browser` | o browser responde em `BU_CDP_URL` |
+| `browser_harness` | resultado de `browser-harness doctor --json` |
+
+Corre-o primeiro quando o `run` der erro.
+
+Limites herdados do MVP: sem shadow DOM, iframes, canvas, uploads nem pop-ups. Use para pesquisar, abrir, filtrar e preencher formulários simples, não para logins ou pagamentos.
 
 ### Sincronizar com o original
 
