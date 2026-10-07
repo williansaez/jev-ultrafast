@@ -6,6 +6,9 @@
 > **The Browser Use Cloud waitlist is open.** Get early access to ultrafast browser agents in the cloud.
 > **[Join the waitlist →](https://browser-use.com/ultrafast?utm_source=github&utm_medium=readme&utm_campaign=jev-ultrafast)**
 
+> [!NOTE]
+> **Este é um fork pessoal** de [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast). Ele acrescenta um servidor MCP e o suporte a um modelo de texto local via Ollama. Detalhes em [Este fork](#este-fork-servidor-mcp-e-ollama). O resto do README é o original.
+
 **A browser agent with a dynamic, indexed action space.**
 
 Give it one goal. [TypeSafe's Jev](https://docs.typesafe.ai/introduction) picks an operation and an element. A small LLM writes text only when the operation is `TYPE_TEXT`.
@@ -15,6 +18,106 @@ Give it one goal. [TypeSafe's Jev](https://docs.typesafe.ai/introduction) picks 
 <a href="docs/demo.mp4"><img src="docs/demo.gif" alt="A real Google Flights search at 1× speed, with generated city names and dynamic operation/target decisions" width="100%" /></a>
 
 [Watch the MP4](docs/demo.mp4) · [Measurements](docs/performance.md) · [Read the loop](jev_ultrafast/agent.py)
+
+## Este fork: servidor MCP e Ollama
+
+### O que muda em relação ao original
+
+| Ficheiro | Mudança |
+|---|---|
+| `jev_ultrafast/mcp_server.py` (novo) | Servidor MCP (stdio) com as tools `jev_ultrafast_run` e `jev_ultrafast_doctor`. Arranca sozinho um browser dedicado quando a porta CDP não responde. |
+| `jev_ultrafast/model.py` | Nova opção `TEXT_MODEL_REASONING=effort_none`, que envia `reasoning_effort: "none"`, o formato que o endpoint `/v1` do Ollama respeita. |
+| `pyproject.toml` | Dependência `mcp` e comando `jev-ultrafast-mcp`. |
+
+### Dois modelos, dois papéis
+
+| Papel | Modelo | Configurável? |
+|---|---|---|
+| **Decisão**: qual operação (`CLICK`, `TYPE_TEXT`, `SELECT`, …) e qual elemento | Jev, sempre em `api.typesafe.ai` | Não. Exige `TYPESAFE_API_KEY`. |
+| **Texto**: o valor a escrever num campo, só em `TYPE_TEXT` | Qualquer API compatível com OpenAI | Sim: `TEXT_MODEL_BASE_URL`, `TEXT_MODEL`, `TEXT_MODEL_API_KEY`. |
+
+Clicar, navegar e escolher opções funciona sem modelo de texto. Ele só é chamado para preencher campos (caixa de pesquisa, formulário).
+
+### Como o preenchimento de campos funciona (igual ao original)
+
+1. O Jev escolhe `TYPE_TEXT` num campo.
+2. O agente monta um contexto: objetivo, rótulo do campo, título e texto da página (até 6000 caracteres) e as últimas 6 ações.
+3. Envia para `<TEXT_MODEL_BASE_URL>/chat/completions` e pede um JSON `{"text": "..."}`.
+4. Valida (texto não vazio, até 2000 caracteres) e escreve no campo. Resposta inválida: não escreve nada e dá erro.
+5. Sem `TEXT_MODEL_API_KEY` falha logo. Nenhum texto é fixo nem adivinhado.
+
+### Modelo de texto: original vs este fork
+
+| | Original | Este fork |
+|---|---|---|
+| Default no código | DeepSeek `deepseek-chat` | igual |
+| Sugerido no `.env.example` | OpenRouter `inception/mercury-2.5` | Ollama local `qwen3.5:9b` |
+| Custo | pago | grátis |
+| Texto da página | vai para a cloud | fica na máquina (só a decisão vai para a TypeSafe) |
+| Latência | rápida | ~13 s no primeiro pedido (carga do modelo), depois rápida |
+
+Sem `effort_none`, o qwen3.5 no Ollama ignora o pedido de desligar o raciocínio, gasta ~320 tokens a pensar e devolve uma resposta vazia. Com ele, responde em ~7 tokens.
+
+### Configuração (`.env`)
+
+```bash
+TYPESAFE_API_KEY=...                         # obrigatório
+TYPESAFE_MODEL=jev-latest
+
+# Texto via Ollama local
+TEXT_MODEL_API_KEY=ollama                    # qualquer valor não vazio
+TEXT_MODEL_BASE_URL=http://127.0.0.1:11434/v1
+TEXT_MODEL=qwen3.5:9b
+TEXT_MODEL_REASONING=effort_none
+
+# Browser dedicado com CDP
+BU_CDP_URL=http://127.0.0.1:9222
+# JEV_EDGE_PROFILE_DIR=~/.config/browser-harness/edge-profile
+# JEV_BROWSER_APP="Microsoft Edge"
+```
+
+O `.env` está no `.gitignore`. Não o commites.
+
+### Browser
+
+O Chromium 136+ ignora `--remote-debugging-port` no perfil por omissão. Por isso o servidor arranca uma **segunda instância** do browser (Edge por omissão) com perfil próprio:
+
+```bash
+open -na "Microsoft Edge" --args --user-data-dir="$HOME/.config/browser-harness/edge-profile" --remote-debugging-port=9222
+```
+
+O browser normal do utilizador fica intocado. Depois de mudar variáveis de ambiente, corre `browser-harness --reload`, senão o daemon antigo continua com o ambiente velho.
+
+### Registar o servidor MCP
+
+Claude Code:
+
+```bash
+claude mcp add --scope user jev-ultrafast -- uv run --directory /caminho/jev-ultrafast --env-file /caminho/jev-ultrafast/.env jev-ultrafast-mcp
+```
+
+Claude Desktop / Cowork (`claude_desktop_config.json`):
+
+```json
+"jev-ultrafast": {
+  "command": "uv",
+  "args": ["run", "--directory", "/caminho/jev-ultrafast", "--env-file", "/caminho/jev-ultrafast/.env", "jev-ultrafast-mcp"]
+}
+```
+
+### Tools
+
+- **`jev_ultrafast_run(url, goal, include_page_text=true, record_dir=null)`** corre um objetivo até ao fim. Devolve `status`, `final_url`, `steps`, `history` e `page_text` (primeiros 4000 caracteres). `status: done` é a palavra do agente: confirma pelo `final_url` e pelo `page_text`.
+- **`jev_ultrafast_doctor()`** verifica a chave TypeSafe, o endpoint de texto e o browser. Corre-o primeiro quando o `run` der erro.
+
+Limites herdados do MVP: sem shadow DOM, iframes, canvas, uploads nem pop-ups.
+
+### Sincronizar com o original
+
+```bash
+git fetch upstream
+git merge upstream/main
+```
 
 ## The action space
 
