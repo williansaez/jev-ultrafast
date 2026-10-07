@@ -34,9 +34,10 @@ Três mudanças em relação ao [original](https://github.com/browser-use/jev-ul
 | `jev_ultrafast/mcp_server.py` (novo) | Servidor MCP (stdio) com as tools `jev_ultrafast_run` e `jev_ultrafast_doctor`. Arranca um browser dedicado quando a porta CDP não responde. Erros voltam como JSON com uma dica, em vez de derrubar o servidor. |
 | `jev_ultrafast/model.py` | Nova opção `TEXT_MODEL_REASONING=effort_none`, que envia `reasoning_effort: "none"`, o formato que o endpoint `/v1` do Ollama respeita. As opções originais continuam iguais. |
 | `pyproject.toml` | Dependência `mcp>=2.2.0` e comando `jev-ultrafast-mcp`. |
+| `.env.example` | Sugere o Ollama local (`qwen3.5:9b`, `effort_none`) e `BU_CDP_URL`. O OpenRouter original fica comentado. |
 | `README.md` | Esta secção. |
 
-O `.env.example` não mudou: continua a sugerir o OpenRouter. A configuração com Ollama está [abaixo](#configuração-env).
+O `.env.example` também mudou: sugere o Ollama local e deixa a configuração original do OpenRouter comentada. Detalhes [abaixo](#configuração-env).
 
 ### Dois modelos, dois papéis
 
@@ -60,7 +61,7 @@ Clicar, navegar e escolher opções funciona sem modelo de texto. Ele só é cha
 | | Original | Este fork |
 |---|---|---|
 | Default no código | DeepSeek `deepseek-chat` | igual |
-| Sugerido | OpenRouter `inception/mercury-2.5` (`.env.example`) | Ollama local `qwen3.5:9b` (este README) |
+| Sugerido no `.env.example` | OpenRouter `inception/mercury-2.5` | Ollama local `qwen3.5:9b` |
 | Custo | pago | grátis |
 | Texto da página | vai para a cloud | fica na máquina (só a decisão vai para a TypeSafe) |
 | Latência | rápida | ~13 s no primeiro pedido (carga do modelo), depois rápida |
@@ -195,7 +196,7 @@ git clone https://github.com/browser-use/jev-ultrafast.git
 cd jev-ultrafast
 uv sync
 cp .env.example .env
-# Add TYPESAFE_API_KEY and TEXT_MODEL_API_KEY.
+# Add TYPESAFE_API_KEY. The text model defaults to a local Ollama (ollama pull qwen3.5:9b).
 uv run jev
 ```
 
@@ -203,7 +204,7 @@ Open **http://127.0.0.1:8766** and click **Start demo → Run automatically**. T
 
 Chrome connects through [Browser Harness](https://github.com/browser-use/browser-harness), installed by `uv sync`. Run `uv run browser-harness --doctor` if it needs connecting. Allow remote debugging in Chrome when prompted.
 
-`TEXT_MODEL_API_KEY` is an OpenRouter key in the example configuration. The current demo uses `inception/mercury-2.5` with reasoning disabled. Gemini, GLM, and DeepSeek can also use the OpenAI-compatible text helper; configure the appropriate model, endpoint, and reasoning setting.
+In this fork the example configuration points the text helper at a local Ollama; the original OpenRouter settings are commented out in `.env.example`. The recorded demo used `inception/mercury-2.5` with reasoning disabled. Gemini, GLM, and DeepSeek can also use the OpenAI-compatible text helper; configure the appropriate model, endpoint, and reasoning setting.
 
 ## Use the library
 
