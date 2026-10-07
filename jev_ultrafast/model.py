@@ -166,6 +166,9 @@ def field_text(context):
     reasoning = {"thinking": {"type": "disabled"}} if "api.deepseek.com/" in base else {"reasoning": {"effort": "low"}}
     if os.environ.get("TEXT_MODEL_REASONING") == "none":
         reasoning = {"reasoning": {"enabled": False}}
+    elif os.environ.get("TEXT_MODEL_REASONING") == "effort_none":
+        # OpenAI-style field; Ollama's /v1 endpoint honours it, the OpenRouter-style object above it ignores.
+        reasoning = {"reasoning_effort": "none"}
     started = time.perf_counter()
     result = post_json(
         base + "/chat/completions",
